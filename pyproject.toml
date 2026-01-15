@@ -1,0 +1,18 @@
+[project]
+name = "runtime-agents-openai"
+version = "0.1.0"
+description = "Starter codebase for runtime agent spawning with Streamlit + OpenAI"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "streamlit>=1.35.0",
+  "pydantic>=2.7.0",
+  "httpx>=0.27.0",
+  "anyio>=4.4.0",
+  "python-dotenv>=1.0.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+  "ruff>=0.6.0",
+]

@@ -1,0 +1,40 @@
+.env
+node_modules
+*.pyc
+keys.env
+
+# python venvs
+backend/pyvenv
+document_service/pyvenv
+
+# flask sessions
+backend/flask_session/*
+.DS_Store
+
+# sample data files
+data
+
+# vscode files
+.vscode/
+
+milvus/volumes/*
+
+
+# venv
+.venv/
+
+#zoho output files
+zoho_output/*
+
+# log
+app.log
+*.log
+
+#celerybeat-schedule
+celerybeat-schedule.db
+
+#venv
+
+# NL2SQL Evaluator virtual environment
+backend/nl2sql_evaluator/results/*
+pyvenv/
