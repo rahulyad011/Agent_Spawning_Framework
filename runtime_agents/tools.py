@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Protocol, runtime_checkable
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 import datetime as dt
 import httpx
+import pandas as pd
 
 
 @runtime_checkable
@@ -41,6 +43,89 @@ class HttpGetTool:
 
 
 # --- MCP-ready slot ---
+@dataclass
+class FileReadTool:
+    """Read content from uploaded files."""
+
+    name: str = "file_read"
+    description: str = "Read the content of an uploaded file. Input: {filename: string}."
+
+    session_uploads_dir: Optional[Path] = None
+
+    async def __call__(self, input: Dict[str, Any]) -> Dict[str, Any]:
+        filename = input.get("filename")
+        if not filename:
+            return {"error": "Missing 'filename'."}
+
+        if not self.session_uploads_dir:
+            return {"error": "Session uploads directory not set."}
+
+        file_path = self.session_uploads_dir / "files" / filename
+        if not file_path.exists():
+            return {"error": f"File '{filename}' not found."}
+
+        try:
+            # Try text files first
+            if file_path.suffix in [".txt", ".md", ".py", ".json", ".csv", ".log"]:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                return {"filename": filename, "content": content, "type": "text"}
+
+            # Handle CSV files
+            elif file_path.suffix == ".csv":
+                df = pd.read_csv(file_path)
+                return {
+                    "filename": filename,
+                    "content": df.to_string(),
+                    "type": "csv",
+                    "shape": list(df.shape),
+                    "columns": list(df.columns),
+                }
+
+            # Handle JSON files
+            elif file_path.suffix == ".json":
+                with open(file_path, "r", encoding="utf-8") as f:
+                    import json
+
+                    data = json.load(f)
+                return {
+                    "filename": filename,
+                    "content": json.dumps(data, indent=2),
+                    "type": "json",
+                }
+
+            else:
+                return {"error": f"Unsupported file type: {file_path.suffix}"}
+
+        except Exception as e:
+            return {"error": f"Error reading file: {str(e)}"}
+
+
+@dataclass
+class FileListTool:
+    """List files uploaded in the current session."""
+
+    name: str = "file_list"
+    description: str = "List all files uploaded in the current session."
+
+    session_files: Optional[List[Dict[str, Any]]] = None
+
+    async def __call__(self, input: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.session_files:
+            return {"files": []}
+
+        file_list = [
+            {
+                "filename": f.get("filename", "unknown"),
+                "file_type": f.get("file_type", "unknown"),
+                "size_bytes": f.get("size_bytes", 0),
+            }
+            for f in self.session_files
+        ]
+
+        return {"files": file_list, "count": len(file_list)}
+
+
 @dataclass
 class MCPToolAdapter:
     """Placeholder adapter to wrap an MCP tool call.

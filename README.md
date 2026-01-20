@@ -33,7 +33,16 @@ Then edit `.env` and add your OpenAI API key:
 OPENAI_API_KEY=your-api-key-here
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_BASE_URL=https://api.openai.com
+LOG_LEVEL=DEBUG  # Options: DEBUG, INFO, WARNING, ERROR
 ```
+
+**Log Levels:**
+- `DEBUG`: Detailed logs including routing decisions, agent execution, tool calls
+- `INFO`: High-level logs (agent selection, completion status)
+- `WARNING`: Only warnings and errors
+- `ERROR`: Only errors
+
+You can also change the log level in the Streamlit UI sidebar.
 
 ### Run the UI
 ```bash
