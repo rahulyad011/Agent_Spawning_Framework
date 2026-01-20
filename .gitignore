@@ -38,3 +38,11 @@ celerybeat-schedule.db
 # NL2SQL Evaluator virtual environment
 backend/nl2sql_evaluator/results/*
 pyvenv/
+
+sessions/*
+
+.venv/
+
+.cursor/
+
+uploads/*
