@@ -5,15 +5,39 @@ description = "Starter codebase for runtime agent spawning with Streamlit + Open
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  # Core dependencies (required)
   "streamlit>=1.35.0",
   "pydantic>=2.7.0",
   "httpx>=0.27.0",
   "anyio>=4.4.0",
   "python-dotenv>=1.0.0",
-  "sqlalchemy>=2.0.0",
-  "pypdf>=3.0.0",
-  "Pillow>=10.0.0",
-  "pandas>=2.0.0",
+  "pyyaml>=6.0.0",  # For config.yaml parsing
+  
+  # Template-based (current, always enabled)
+  "sqlalchemy>=2.0.0",  # For db_tools
+  "pypdf>=3.0.0",       # For file processing
+  "Pillow>=10.0.0",     # For image processing
+  "pandas>=2.0.0",      # For CSV processing
+  
+  # LLM-generated agents (optional - uses same dependencies as template-based)
+  # No additional dependencies needed
+  
+  # Compositional agents (optional)
+  # No additional dependencies needed
+  
+  # Meta-agent (optional)
+  # No additional dependencies needed
+  
+  # Hierarchical agents (optional)
+  # No additional dependencies needed
+  
+  # Evolutionary system (optional)
+  # "numpy>=1.24.0",    # For fitness calculations (uncomment if needed)
+  # "scipy>=1.10.0",    # For statistical analysis (uncomment if needed)
+  
+  # Performance tracking (optional)
+  # "matplotlib>=3.7.0", # For performance charts (uncomment if needed)
+  # "plotly>=5.14.0",   # For interactive charts (uncomment if needed)
 ]
 
 [tool.uv]

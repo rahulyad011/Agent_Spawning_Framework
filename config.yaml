@@ -1,0 +1,29 @@
+agent_type: llm_generated
+compositional:
+  component_library_path: components/
+  default_behavior: thorough
+  enable_behavior_styles: true
+evolutionary:
+  crossover_rate: 0.7
+  fitness_threshold: 0.7
+  mutation_rate: 0.1
+  pool_size: 10
+  selection_method: fitness_based
+hierarchical:
+  max_depth: 3
+  max_parallel_agents: 5
+  parallel_execution: true
+llm_generated:
+  generation_model: gpt-4o-mini
+  max_agents: 3
+  temperature: 0.7
+meta:
+  adaptive_prompting: true
+  context_window_size: 8000
+  dynamic_tool_selection: true
+performance_tracking:
+  enabled: true
+  metrics_file: performance_metrics.json
+template_based:
+  fallback_to_heuristics: true
+  use_llm_routing: true

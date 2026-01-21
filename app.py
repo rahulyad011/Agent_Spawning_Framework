@@ -3,28 +3,27 @@ import os
 import uuid
 from dataclasses import asdict
 from datetime import datetime
-from io import StringIO
 from pathlib import Path
 
 import anyio
 import streamlit as st
+import yaml
 from dotenv import load_dotenv
 
-from runtime_agents.logger import get_logger
+from runtime_agents.shared.llm import OpenAIChatClient
+from runtime_agents.shared.logger import get_logger
+from runtime_agents.shared.db_tools import DatabaseConnectionTool
+from utils.agent_factory import AgentFactory
+from utils.performance_tracker import PerformanceTracker
+from utils.session_manager import SessionManager
+from utils.tool_registry import get_default_tools
+from utils.ui_components import (
+    mask_key,
+    render_file_upload,
+    render_sidebar_settings,
+)
 
 logger = get_logger(__name__)
-
-from runtime_agents.agents import AgentTemplate
-from runtime_agents.db_tools import (
-    DatabaseConnectionTool,
-    DatabaseQueryTool,
-    SchemaIntrospectionTool,
-)
-from runtime_agents.image_tools import ImageAnalysisTool, ImageListTool
-from runtime_agents.llm import OpenAIChatClient
-from runtime_agents.orchestrator import Orchestrator
-from runtime_agents.session import SessionManager
-from runtime_agents.tools import FileListTool, FileReadTool, HttpGetTool, TimeTool
 
 # Load environment variables from .env file
 load_dotenv()
@@ -32,20 +31,17 @@ load_dotenv()
 # Initialize session manager
 session_manager = SessionManager()
 
+# Initialize agent factory
+agent_factory = AgentFactory()
 
-def mask_key(key: str) -> str:
-    if not key:
-        return "(not set)"
-    if len(key) <= 8:
-        return "***"
-    return key[:4] + "..." + key[-4:]
-
+# Initialize performance tracker
+performance_tracker = PerformanceTracker()
 
 st.set_page_config(page_title="Runtime Agent Spawner (OpenAI)", layout="wide")
 
 st.title("Runtime Agent Spawner (OpenAI)")
 st.caption(
-    "Conversational agent spawning: orchestrator selects agent templates, spawns instances, and aggregates results."
+    "Multi-architecture agent system: Compare template-based, LLM-generated, compositional, meta, hierarchical, and evolutionary agents."
 )
 
 # Initialize session state
@@ -55,6 +51,8 @@ if "session_manager" not in st.session_state:
     st.session_state.session_manager = session_manager
 if "db_connection_tool" not in st.session_state:
     st.session_state.db_connection_tool = DatabaseConnectionTool()
+if "agent_type" not in st.session_state:
+    st.session_state.agent_type = agent_factory.config.get("agent_type", "template_based")
 
 # Read env defaults from .env file
 ENV_KEY = os.getenv("OPENAI_API_KEY")
@@ -62,71 +60,52 @@ ENV_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 ENV_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com")
 
 with st.sidebar:
-    st.header("Session Management")
-    # Session selector
-    existing_sessions = session_manager.list_sessions()
-    if existing_sessions:
-        selected_session = st.selectbox(
-            "Load existing session",
-            ["-- New Session --"] + existing_sessions,
-            key="session_selector",
-        )
-        if selected_session != "-- New Session --":
-            if st.button("Load Session"):
-                session = session_manager.load_session(selected_session)
-                if session:
-                    st.session_state.session_id = session.session_id
-                    st.rerun()
-
-    if st.button("New Session"):
-        new_session = session_manager.create_session()
-        st.session_state.session_id = new_session.session_id
-        st.rerun()
-
-    if st.session_state.session_id:
-        if st.button("Delete Current Session"):
-            session_manager.delete_session(st.session_state.session_id)
-            st.session_state.session_id = None
-            st.rerun()
-
-    st.divider()
-
-    st.header("OpenAI Settings")
-    st.write(f"API key (.env OPENAI_API_KEY): {mask_key(ENV_KEY) if ENV_KEY else '(not set)'}")
-
-    api_key = st.text_input(
-        "API key override (optional)",
-        type="password",
-        value="",
-        help="Leave blank to use OPENAI_API_KEY from the .env file.",
+    # Agent type selector
+    st.header("Agent Architecture")
+    agent_types = [
+        "template_based",
+        "llm_generated",
+        "compositional",
+        "meta",
+        "hierarchical",
+        "evolutionary",
+    ]
+    selected_agent_type = st.selectbox(
+        "Select Agent Type",
+        agent_types,
+        index=agent_types.index(st.session_state.agent_type) if st.session_state.agent_type in agent_types else 0,
+        help="Choose which agent architecture to use",
     )
-    model = st.text_input("Model", value=ENV_MODEL)
-    base_url = st.text_input("Base URL", value=ENV_BASE)
+    if selected_agent_type != st.session_state.agent_type:
+        st.session_state.agent_type = selected_agent_type
+        st.info(f"Switched to {selected_agent_type} architecture")
+        # Update config file
+        try:
+            config_path = Path("config.yaml")
+            if config_path.exists():
+                with open(config_path, "r") as f:
+                    config = yaml.safe_load(f) or {}
+                config["agent_type"] = selected_agent_type
+                with open(config_path, "w") as f:
+                    yaml.dump(config, f)
+        except Exception as e:
+            logger.warning(f"Could not update config: {e}")
 
     st.divider()
 
-    st.header("File Upload")
-    uploaded_files = st.file_uploader(
-        "Upload files",
-        type=["txt", "pdf", "csv", "json", "md", "py", "log"],
-        accept_multiple_files=True,
+    # Session management and settings
+    api_key, model, base_url = render_sidebar_settings(
+        session_manager, ENV_MODEL, ENV_BASE
     )
 
+    # File and image uploads
+    uploaded_files, uploaded_images = render_file_upload()
+
+    # Database connection UI
     st.divider()
-
-    st.header("Image Upload")
-    uploaded_images = st.file_uploader(
-        "Upload images",
-        type=["png", "jpg", "jpeg", "gif", "webp"],
-        accept_multiple_files=True,
-        key="image_uploader",
-    )
-
-    st.divider()
-
     st.header("Database Connection")
     db_type = st.selectbox("Database Type", ["postgresql", "mysql", "sqlite"])
-    db_connection_string = st.text_input(
+    db_connection_string = st.sidebar.text_input(
         "Connection String",
         type="password",
         help="e.g., postgresql://user:pass@host:port/dbname",
@@ -134,7 +113,6 @@ with st.sidebar:
     if st.button("Connect to Database"):
         if db_connection_string:
             connection_id = f"db_{uuid.uuid4().hex[:8]}"
-            # Use anyio.run for async call
             async def connect_db():
                 return await st.session_state.db_connection_tool.__call__(
                     {
@@ -147,11 +125,10 @@ with st.sidebar:
             result = anyio.run(connect_db)
             if "error" not in result:
                 st.success(f"Connected! Connection ID: {connection_id}")
-                # Store connection in session
                 if st.session_state.session_id:
                     session = session_manager.load_session(st.session_state.session_id)
                     if session:
-                        from runtime_agents.session import DBConnection
+                        from utils.session_manager import DBConnection
 
                         session.db_connections.append(
                             DBConnection(
@@ -168,8 +145,13 @@ with st.sidebar:
     st.divider()
     st.subheader("Debug Logs")
     current_log_level = os.getenv("LOG_LEVEL", "DEBUG")
-    log_level = st.selectbox("Log Level", ["DEBUG", "INFO", "WARNING", "ERROR"], 
-                             index=["DEBUG", "INFO", "WARNING", "ERROR"].index(current_log_level) if current_log_level in ["DEBUG", "INFO", "WARNING", "ERROR"] else 0)
+    log_level = st.selectbox(
+        "Log Level",
+        ["DEBUG", "INFO", "WARNING", "ERROR"],
+        index=["DEBUG", "INFO", "WARNING", "ERROR"].index(current_log_level)
+        if current_log_level in ["DEBUG", "INFO", "WARNING", "ERROR"]
+        else 0,
+    )
     if st.button("Update Log Level"):
         os.environ["LOG_LEVEL"] = log_level
         logger.setLevel(getattr(logging, log_level, logging.DEBUG))
@@ -179,14 +161,20 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
+    st.subheader("Performance Metrics")
+    if st.button("View Performance Comparison"):
+        st.session_state.show_performance = True
+
+    st.divider()
     st.subheader("Notes")
     st.write(
-        "This starter uses the Chat Completions endpoint (`/v1/chat/completions`).\n"
-        "If you're using an OpenAI-compatible gateway (vLLM/LiteLLM), set Base URL accordingly."
+        "This app supports 6 agent architectures. Switch between them using the dropdown above."
     )
     st.write(
-        f"**Log Level**: Set via LOG_LEVEL environment variable or use the dropdown above. "
-        f"Current: {os.getenv('LOG_LEVEL', 'DEBUG')}"
+        f"**Current Agent Type**: {st.session_state.agent_type.replace('_', ' ').title()}"
+    )
+    st.write(
+        f"**Log Level**: {os.getenv('LOG_LEVEL', 'DEBUG')}"
     )
 
 # Ensure we have a session
@@ -204,15 +192,12 @@ if not current_session:
 if uploaded_files:
     uploads_dir = session_manager.get_session_uploads_dir(current_session.session_id)
     for uploaded_file in uploaded_files:
-        # Check if file already exists
         file_path = uploads_dir / "files" / uploaded_file.name
         if not file_path.exists():
-            # Save file
             with open(file_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
 
-            # Add to session
-            from runtime_agents.session import FileMetadata
+            from utils.session_manager import FileMetadata
 
             file_metadata = FileMetadata(
                 filename=uploaded_file.name,
@@ -230,15 +215,12 @@ if uploaded_files:
 if uploaded_images:
     uploads_dir = session_manager.get_session_uploads_dir(current_session.session_id)
     for uploaded_image in uploaded_images:
-        # Check if image already exists
         image_path = uploads_dir / "images" / uploaded_image.name
         if not image_path.exists():
-            # Save image
             with open(image_path, "wb") as f:
                 f.write(uploaded_image.getbuffer())
 
-            # Add to session
-            from runtime_agents.session import ImageMetadata
+            from utils.session_manager import ImageMetadata
 
             image_metadata = ImageMetadata(
                 filename=uploaded_image.name,
@@ -269,7 +251,21 @@ with chat_container:
 
 # Display current session info
 if st.session_state.session_id:
-    st.info(f"Session: {st.session_state.session_id}")
+    st.info(f"Session: {st.session_state.session_id} | Agent Type: {st.session_state.agent_type.replace('_', ' ').title()}")
+
+# Performance comparison view
+if st.session_state.get("show_performance", False):
+    st.subheader("Performance Comparison")
+    comparison = performance_tracker.get_comparison_stats()
+    if comparison:
+        import pandas as pd
+
+        df = pd.DataFrame(comparison).T
+        st.dataframe(df)
+    else:
+        st.info("No performance data yet. Run some queries to collect metrics.")
+    if st.button("Close Performance View"):
+        st.session_state.show_performance = False
 
 # Chat input
 user_input = st.chat_input("Enter your message...", disabled=not bool(key_in_use))
@@ -285,145 +281,155 @@ if user_input and key_in_use:
 
     # Prepare tools with session context
     uploads_dir = session_manager.get_session_uploads_dir(current_session.session_id)
-    file_read_tool = FileReadTool(session_uploads_dir=uploads_dir)
-    file_list_tool = FileListTool(
-        session_files=[asdict(f) for f in current_session.files]
+    tools = get_default_tools(
+        session_uploads_dir=uploads_dir,
+        session_files=[asdict(f) for f in current_session.files],
+        session_images=[asdict(img) for img in current_session.images],
+        db_connection_tool=st.session_state.db_connection_tool,
     )
 
-    # Database tools
-    schema_tool = SchemaIntrospectionTool(
-        connection_tool=st.session_state.db_connection_tool
-    )
-    query_tool = DatabaseQueryTool(connection_tool=st.session_state.db_connection_tool)
+    # Set LLM client for image analysis tool
+    client = OpenAIChatClient(api_key=key_in_use, model=model, base_url=base_url)
+    if "image_analyze" in tools:
+        tools["image_analyze"].llm_client = client
 
-    # Image tools
-    image_analysis_tool = ImageAnalysisTool(session_uploads_dir=uploads_dir)
-    image_list_tool = ImageListTool(
-        session_images=[asdict(img) for img in current_session.images]
-    )
-
-    # Tool registry
-    tools = {
-        "time_now": TimeTool(),
-        "http_get": HttpGetTool(),
-        "file_read": file_read_tool,
-        "file_list": file_list_tool,
-        "db_schema": schema_tool,
-        "db_query": query_tool,
-        "image_analyze": image_analysis_tool,
-        "image_list": image_list_tool,
-    }
-
-    # Agent templates
-    registry = {
-        "planner": AgentTemplate(
-            key="planner",
-            name="Planner",
-            system_prompt="You break down the request into an execution plan and identify missing info.",
-            tool_names=["time_now", "file_list", "image_list"],
-        ),
-        "researcher": AgentTemplate(
-            key="researcher",
-            name="Researcher",
-            system_prompt=(
-                "You gather references and factual details. "
-                "If you need to fetch a URL, ask for it (or use http_get if available and appropriate)."
-            ),
-            tool_names=["http_get", "file_read"],
-        ),
-        "analyst": AgentTemplate(
-            key="analyst",
-            name="Analyst",
-            system_prompt="You analyze tradeoffs, compare options, and produce structured reasoning.",
-            tool_names=["file_read", "db_schema", "db_query"],
-        ),
-        "writer": AgentTemplate(
-            key="writer",
-            name="Writer",
-            system_prompt="You write clean, concise outputs tailored to the request.",
-            tool_names=["file_read"],
-        ),
-    }
-
-    # Build detailed context from session for agents
+    # Build session context
     session_context_parts = []
-    
+
     if current_session.files:
-        file_list = "\n".join([
-            f"  - {f.filename} ({f.file_type}, {f.size_bytes} bytes)"
-            for f in current_session.files
-        ])
-        session_context_parts.append(f"Uploaded files available:\n{file_list}\nYou can use the 'file_read' tool to read any of these files.")
-    
+        file_list = "\n".join(
+            [
+                f"  - {f.filename} ({f.file_type}, {f.size_bytes} bytes)"
+                for f in current_session.files
+            ]
+        )
+        session_context_parts.append(
+            f"Uploaded files available:\n{file_list}\nYou can use the 'file_read' tool to read any of these files."
+        )
+
     if current_session.images:
-        image_list = "\n".join([
-            f"  - {img.filename} ({img.image_format}, {img.size_bytes} bytes)"
-            for img in current_session.images
-        ])
-        session_context_parts.append(f"Uploaded images available:\n{image_list}\nYou can use the 'image_analyze' tool to analyze any of these images.")
-    
+        image_list = "\n".join(
+            [
+                f"  - {img.filename} ({img.image_format}, {img.size_bytes} bytes)"
+                for img in current_session.images
+            ]
+        )
+        session_context_parts.append(
+            f"Uploaded images available:\n{image_list}\nYou can use the 'image_analyze' tool to analyze any of these images."
+        )
+
     if current_session.db_connections:
         db_info = []
         for db_conn in current_session.db_connections:
-            db_info.append(f"  - Connection ID: {db_conn.connection_id}, Type: {db_conn.db_type}")
+            db_info.append(
+                f"  - Connection ID: {db_conn.connection_id}, Type: {db_conn.db_type}"
+            )
             if db_conn.selected_tables:
-                db_info.append(f"    Selected tables: {', '.join(db_conn.selected_tables)}")
+                db_info.append(
+                    f"    Selected tables: {', '.join(db_conn.selected_tables)}"
+                )
         session_context_parts.append(
-            f"Database connections available:\n" + "\n".join(db_info) + 
-            "\nYou can use 'db_schema' to inspect table structures and 'db_query' to query data."
+            f"Database connections available:\n"
+            + "\n".join(db_info)
+            + "\nYou can use 'db_schema' to inspect table structures and 'db_query' to query data."
         )
 
-    # Build session context string
     session_context = ""
     if session_context_parts:
         session_context = "Available resources:\n" + "\n\n".join(session_context_parts)
 
-    # Add conversation history context
     if len(current_session.chat_history) > 1:
-        recent_messages = current_session.chat_history[-5:-1]  # Last 4 messages (excluding current)
+        recent_messages = current_session.chat_history[-5:-1]
         if recent_messages:
-            history_text = "\n".join([
-                f"{msg['role']}: {msg['content'][:200]}..." if len(msg['content']) > 200 else f"{msg['role']}: {msg['content']}"
-                for msg in recent_messages
-            ])
+            history_text = "\n".join(
+                [
+                    f"{msg['role']}: {msg['content'][:200]}..."
+                    if len(msg["content"]) > 200
+                    else f"{msg['role']}: {msg['content']}"
+                    for msg in recent_messages
+                ]
+            )
             session_context += "\n\nRecent conversation history:\n" + history_text
 
-    # Create LLM client
-    client = OpenAIChatClient(api_key=key_in_use, model=model, base_url=base_url)
+    # Create orchestrator using factory
+    try:
+        orch = agent_factory.create_orchestrator(
+            llm=client,
+            tools=tools,
+            session_context=session_context,
+            agent_type=st.session_state.agent_type,
+        )
 
-    # Set LLM client for image analysis
-    image_analysis_tool.llm_client = client
+        # Run orchestrator with performance tracking
+        with st.chat_message("assistant"):
+            with st.spinner(f"Running {st.session_state.agent_type.replace('_', ' ')} agents..."):
+                try:
+                    performance_tracker.start_execution()
+                    logger.info(
+                        f"[APP] Starting {st.session_state.agent_type} orchestrator for: {user_input[:100]}..."
+                    )
 
-    # Create orchestrator with session context
-    orch = Orchestrator(llm=client, registry=registry, tools=tools, session_context=session_context)
+                    agent_results, final = anyio.run(orch.run, user_input)
 
-    # Prepare requirement (user input only, context goes to orchestrator)
-    requirement = user_input
+                    execution_time = performance_tracker.get_execution_time()
+                    metrics = orch.get_metrics()
 
-    # Run orchestrator
-    with st.chat_message("assistant"):
-        with st.spinner("Running agents..."):
-            try:
-                logger.info(f"[APP] Starting orchestrator for user input: {user_input[:100]}...")
-                agent_results, final = anyio.run(orch.run, requirement)
-                logger.info(f"[APP] Orchestrator completed successfully")
+                    # Record metrics
+                    if performance_tracker:
+                        performance_tracker.record_execution(
+                            agent_type=st.session_state.agent_type,
+                            execution_time=execution_time,
+                            token_usage=metrics.token_usage,
+                            cost_estimate=metrics.cost_estimate,
+                            num_agents_spawned=metrics.num_agents_spawned,
+                            tool_calls_count=metrics.tool_calls_count,
+                        )
+                        performance_tracker.save_metrics()
 
-                # Display final answer
-                st.write(final)
+                    logger.info(f"[APP] Orchestrator completed successfully")
 
-                # Add assistant message to session
-                current_session.add_message("assistant", final)
-                session_manager.save_session(current_session)
+                    # Display final answer
+                    st.write(final)
 
-                # Show agent details in expander
-                with st.expander("Agent Details", expanded=False):
-                    for r in agent_results:
-                        st.write(f"**{r.agent_name}**:")
-                        st.write(r.output)
-                        st.divider()
+                    # Add assistant message to session
+                    current_session.add_message("assistant", final)
+                    session_manager.save_session(current_session)
 
-            except Exception as e:
-                error_msg = f"Error: {str(e)}"
-                st.error(error_msg)
-                current_session.add_message("assistant", error_msg)
-                session_manager.save_session(current_session)
+                    # Show agent details in expander
+                    with st.expander("Agent Details", expanded=False):
+                        for r in agent_results:
+                            st.write(f"**{r.agent_name}**:")
+                            st.write(r.output)
+                            if r.tool_calls:
+                                st.write(f"*Tool calls: {len(r.tool_calls)}*")
+                            st.divider()
+
+                    # Show performance metrics
+                    with st.expander("Performance Metrics", expanded=False):
+                        st.write(f"**Execution Time**: {execution_time:.2f}s")
+                        st.write(f"**Agents Spawned**: {metrics.num_agents_spawned}")
+                        st.write(f"**Tool Calls**: {metrics.tool_calls_count}")
+
+                except Exception as e:
+                    error_msg = f"Error: {str(e)}"
+                    st.error(error_msg)
+                    logger.error(f"[APP] Error: {e}", exc_info=True)
+                    current_session.add_message("assistant", error_msg)
+                    session_manager.save_session(current_session)
+
+                    # Record failed execution
+                    if performance_tracker:
+                        performance_tracker.record_execution(
+                            agent_type=st.session_state.agent_type,
+                            execution_time=performance_tracker.get_execution_time(),
+                            token_usage={"input_tokens": 0, "output_tokens": 0},
+                            cost_estimate=0.0,
+                            num_agents_spawned=0,
+                            tool_calls_count=0,
+                            success=False,
+                            error_message=str(e),
+                        )
+
+    except Exception as e:
+        st.error(f"Failed to create orchestrator: {str(e)}")
+        logger.error(f"[APP] Factory error: {e}", exc_info=True)

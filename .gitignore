@@ -42,3 +42,6 @@ pyvenv/
 # Session and upload storage
 sessions/
 uploads/
+
+# Performance metrics
+performance_metrics.json
