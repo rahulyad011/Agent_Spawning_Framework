@@ -21,6 +21,7 @@ from utils.ui_components import (
     mask_key,
     render_file_upload,
     render_sidebar_settings,
+    render_assistant_message,
 )
 
 logger = get_logger(__name__)
@@ -245,9 +246,13 @@ chat_container = st.container()
 with chat_container:
     for message in current_session.chat_history:
         role = message["role"]
-        content = message["content"]
         with st.chat_message(role):
-            st.write(content)
+            if role == "assistant":
+                # Use enhanced rendering for assistant messages
+                render_assistant_message(message)
+            else:
+                # Simple rendering for user messages
+                st.write(message["content"])
 
 # Display current session info
 if st.session_state.session_id:
@@ -388,11 +393,38 @@ if user_input and key_in_use:
 
                     logger.info(f"[APP] Orchestrator completed successfully")
 
-                    # Display final answer
-                    st.write(final)
+                    # Collect visualization attachments from tool results
+                    attachments = []
+                    for agent_result in agent_results:
+                        for tool_call in agent_result.tool_calls:
+                            tool_name = tool_call.get("tool")
+                            result = tool_call.get("result", {})
+                            
+                            # Check for render_plot or render_mermaid tool results
+                            if tool_name == "render_plot" and result.get("type") == "plot":
+                                if "image_base64" in result and not result.get("error"):
+                                    attachments.append({
+                                        "type": "plot",
+                                        "image_base64": result["image_base64"],
+                                        "format": result.get("format", "png")
+                                    })
+                            elif tool_name == "render_mermaid" and result.get("type") == "mermaid":
+                                if "code" in result and not result.get("error"):
+                                    attachments.append({
+                                        "type": "mermaid",
+                                        "code": result["code"]
+                                    })
+                    
+                    # Create message dict with content and attachments
+                    message_dict = {"role": "assistant", "content": final}
+                    if attachments:
+                        message_dict["attachments"] = attachments
+                    
+                    # Display final answer with visualizations
+                    render_assistant_message(message_dict)
 
-                    # Add assistant message to session
-                    current_session.add_message("assistant", final)
+                    # Add assistant message to session with attachments
+                    current_session.add_message("assistant", final, attachments=attachments if attachments else None)
                     session_manager.save_session(current_session)
 
                     # Show agent details in expander

@@ -86,9 +86,20 @@ class Session:
             agent_results=data.get("agent_results", []),
         )
 
-    def add_message(self, role: str, content: str) -> None:
-        """Add a message to chat history."""
-        self.chat_history.append({"role": role, "content": content})
+    def add_message(self, role: str, content: str, attachments: Optional[List[Dict[str, Any]]] = None) -> None:
+        """
+        Add a message to chat history.
+        
+        Args:
+            role: Message role (user/assistant)
+            content: Message text content
+            attachments: Optional list of attachments (plots, mermaid diagrams, etc.)
+                        Each attachment is a dict with 'type' and content fields
+        """
+        message = {"role": role, "content": content}
+        if attachments:
+            message["attachments"] = attachments
+        self.chat_history.append(message)
         self.last_accessed = datetime.utcnow().isoformat()
 
     def get_messages(self) -> List[Message]:

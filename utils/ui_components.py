@@ -1,11 +1,14 @@
 """Shared Streamlit UI components for all agent architectures."""
 
+import base64
 import os
-from typing import Optional
+from typing import Optional, Dict, Any
 
 import streamlit as st
 
 from utils.session_manager import SessionManager
+from utils.response_parser import parse_response
+from utils.plot_executor import execute_plot_code, is_plotting_code
 
 
 def mask_key(key: str) -> str:
@@ -105,3 +108,104 @@ def render_db_connection_ui(session_manager: SessionManager) -> None:
         help="e.g., postgresql://user:pass@host:port/dbname",
     )
     # DB connection logic would go here (similar to app.py)
+
+
+def render_assistant_message(message: Dict[str, Any]) -> None:
+    """
+    Render assistant message with text, code blocks, and visualizations.
+    
+    Args:
+        message: Message dict with 'content' and optional 'attachments'
+    """
+    content = message.get("content", "")
+    attachments = message.get("attachments", [])
+    
+    # Parse the response to extract structured content
+    parsed = parse_response(content)
+    
+    # Track if we've rendered anything to avoid empty sections
+    has_content = False
+    
+    # Render text parts
+    for text in parsed.text_parts:
+        if text.strip():
+            st.write(text)
+            has_content = True
+    
+    # Render Python code blocks
+    for code in parsed.python_blocks:
+        if is_plotting_code(code):
+            # Auto-execute plotting code
+            with st.spinner("Rendering plot..."):
+                result = execute_plot_code(code)
+                
+                if result["success"]:
+                    # Decode and display the image
+                    image_data = base64.b64decode(result["image_base64"])
+                    st.image(image_data, use_container_width=True)
+                    has_content = True
+                else:
+                    # Show code and error if execution failed
+                    st.code(code, language="python")
+                    st.error(f"Plot execution failed: {result['error']}")
+                    has_content = True
+        else:
+            # Not plotting code, just display as code
+            st.code(code, language="python")
+            has_content = True
+    
+    # Render Mermaid diagrams
+    if parsed.mermaid_blocks:
+        try:
+            from streamlit_mermaid import st_mermaid
+            
+            for mermaid_code in parsed.mermaid_blocks:
+                st_mermaid(mermaid_code)
+                has_content = True
+        except ImportError:
+            # Fallback if streamlit-mermaid not installed
+            for mermaid_code in parsed.mermaid_blocks:
+                st.code(mermaid_code, language="mermaid")
+                st.warning("Install streamlit-mermaid to render diagrams: pip install streamlit-mermaid")
+                has_content = True
+    
+    # Render SQL blocks
+    for sql_code in parsed.sql_blocks:
+        st.code(sql_code, language="sql")
+        has_content = True
+    
+    # Render other code blocks
+    for language, code in parsed.other_code_blocks:
+        st.code(code, language=language)
+        has_content = True
+    
+    # Render attachments from tool calls
+    if attachments:
+        for att in attachments:
+            try:
+                att_type = att.get("type")
+                
+                if att_type == "plot":
+                    # Render plot attachment
+                    if "image_base64" in att:
+                        image_data = base64.b64decode(att["image_base64"])
+                        st.image(image_data, use_container_width=True)
+                        has_content = True
+                
+                elif att_type == "mermaid":
+                    # Render Mermaid attachment
+                    if "code" in att:
+                        try:
+                            from streamlit_mermaid import st_mermaid
+                            st_mermaid(att["code"])
+                            has_content = True
+                        except ImportError:
+                            st.code(att["code"], language="mermaid")
+                            st.warning("Install streamlit-mermaid to render diagrams: pip install streamlit-mermaid")
+                            has_content = True
+            except Exception as e:
+                st.error(f"Error rendering attachment: {str(e)}")
+    
+    # If nothing was rendered, show the raw content as fallback
+    if not has_content and content:
+        st.write(content)

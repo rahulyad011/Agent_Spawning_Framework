@@ -38,6 +38,12 @@ dependencies = [
   # Performance tracking (optional)
   # "matplotlib>=3.7.0", # For performance charts (uncomment if needed)
   # "plotly>=5.14.0",   # For interactive charts (uncomment if needed)
+  
+  # Visualization and parsing (for render_plot, render_mermaid tools)
+  "matplotlib>=3.7.0",        # For plot execution
+  "seaborn>=0.12.0",          # For enhanced plotting (optional but recommended)
+  "streamlit-mermaid>=0.1.0", # For Mermaid diagram rendering
+  "langchain-core>=0.3.0",    # For structured response parsing
 ]
 
 [tool.uv]

@@ -15,6 +15,7 @@ from runtime_agents.shared.db_tools import (
     SchemaIntrospectionTool,
 )
 from runtime_agents.shared.image_tools import ImageAnalysisTool, ImageListTool
+from utils.visualization_tools import RenderPlotTool, RenderMermaidTool
 
 
 class ToolRegistry:
@@ -61,6 +62,8 @@ def get_default_tools(
     tools = {
         "time_now": TimeTool(),
         "http_get": HttpGetTool(),
+        "render_plot": RenderPlotTool(),
+        "render_mermaid": RenderMermaidTool(),
     }
 
     # File tools
