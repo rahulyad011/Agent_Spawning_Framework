@@ -43,6 +43,7 @@ class DynamicAgentGenerator:
         prompt = f"""Based on this user requirement: "{requirement}"
 
 Create {max_agents} agent specifications that would best handle this task.
+If the user asks to analyze, read, or examine a file, CSV, or dataset, at least one agent MUST include the "file_read" tool so the file content can be read.
 
 For each agent, specify:
 1. role: What this agent's role should be

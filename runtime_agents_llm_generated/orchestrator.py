@@ -1,5 +1,6 @@
 """Orchestrator for LLM-generated agents."""
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -14,6 +15,14 @@ from .generator import AgentSpec, DynamicAgentGenerator
 logger = get_logger(__name__)
 
 
+def _get_available_files_from_context(context: Optional[str]) -> List[str]:
+    """Extract uploaded file names from session context (same pattern as template_based)."""
+    if not context or "Uploaded files available:" not in context:
+        return []
+    file_pattern = re.compile(r"-\s+([^\s(]+\.(?:csv|txt|json|pdf|md|py|log|docx|xlsx))")
+    return file_pattern.findall(context)
+
+
 @dataclass
 class LLMAgentInstance:
     """Instance of an LLM-generated agent."""
@@ -23,7 +32,7 @@ class LLMAgentInstance:
     tools: Dict[str, Tool]
 
     async def run(self, user_input: str, *, context: Optional[str] = None):
-        """Run the agent."""
+        """Run the agent; when file_read is available and user asks for file analysis, run it and feed content to LLM."""
         from runtime_agents.shared.base import AgentResult
 
         sys_prompt = self.spec.system_prompt
@@ -39,7 +48,55 @@ class LLMAgentInstance:
         ]
 
         output = await self.llm.chat(messages, temperature=0.2)
-        return AgentResult(agent_name=self.spec.name, output=output)
+        tool_calls: List[Dict] = []
+        tool_results: List[str] = []
+
+        if "file_read" in self.tools and context:
+            available = _get_available_files_from_context(context)
+            user_lower = user_input.lower()
+            analysis_keywords = ["analyze", "read", "examine", "look at", "check", "review", "process"]
+            wants_analysis = any(kw in user_lower for kw in analysis_keywords)
+            files_to_read: List[str] = []
+            for filename in available:
+                base = filename.split(".")[0].lower()
+                if (
+                    base in user_lower
+                    or filename.lower() in user_lower
+                    or (wants_analysis and len(available) == 1)
+                    or ("file" in user_lower and len(available) == 1)
+                    or ("dataset" in user_lower and filename.endswith(".csv"))
+                ):
+                    files_to_read.append(filename)
+            for filename in files_to_read:
+                try:
+                    result = await self.tools["file_read"]({"filename": filename})
+                    tool_calls.append({"tool": "file_read", "input": {"filename": filename}, "result": result})
+                    content = result.get("content", "")
+                    if result.get("type") == "csv":
+                        content = (content or "")[:5000]
+                    else:
+                        content = (content or "")[:3000]
+                    tool_results.append(f"File '{filename}' content:\n{content}")
+                    logger.info(f"[LLM_AGENT:{self.spec.name}] Read file {filename} ({len(content)} chars)")
+                except Exception as e:
+                    logger.warning(f"[LLM_AGENT:{self.spec.name}] Error reading {filename}: {e}")
+                    tool_calls.append({"tool": "file_read", "input": {"filename": filename}, "result": {"error": str(e)}})
+                    tool_results.append(f"Error reading '{filename}': {str(e)}")
+
+        if tool_results:
+            follow_up = messages + [
+                Message("assistant", output),
+                Message(
+                    "user",
+                    "Here is the data from the tools I executed:\n\n"
+                    + "\n\n".join(tool_results)
+                    + "\n\nPlease analyze this data and provide your comprehensive answer based on the actual file contents.",
+                ),
+            ]
+            output = await self.llm.chat(follow_up, temperature=0.2)
+            logger.info(f"[LLM_AGENT:{self.spec.name}] Produced answer after file_read (length: {len(output)} chars)")
+
+        return AgentResult(agent_name=self.spec.name, output=output, tool_calls=tool_calls)
 
 
 @dataclass

@@ -49,7 +49,7 @@ class Orchestrator(BaseOrchestrator):
                 temperature=0.0,
             )
             logger.debug(f"[ROUTER] LLM routing response: {out}")
-            keys = [k.strip() for k in out.split(",") if k.strip()]
+            keys = [k.strip().lower() for k in out.split(",") if k.strip()]
             keys = [k for k in keys if k in self.registry]
             if keys:
                 logger.info(f"[ROUTER] Selected agents via LLM: {keys}")
@@ -91,8 +91,11 @@ class Orchestrator(BaseOrchestrator):
         logger.debug(f"[ORCHESTRATOR] Session context length: {len(self.session_context)} chars")
         
         plan = await self._route(requirement)
+        if not plan and "Uploaded files available:" in self.session_context:
+            plan = ["analyst"]
+            logger.info(f"[ORCHESTRATOR] Empty plan but session has files; fallback to analyst: {plan}")
         logger.info(f"[ORCHESTRATOR] Execution plan: {plan}")
-        
+
         results: List[AgentResult] = []
 
         context = ""
@@ -104,7 +107,7 @@ class Orchestrator(BaseOrchestrator):
             if context:
                 full_context = (full_context + "\n\n" + context) if full_context else context
             logger.debug(f"[ORCHESTRATOR] Passing context to agent (length: {len(full_context) if full_context else 0} chars)")
-            
+
             res = await agent.run(requirement, context=full_context if full_context else None)
             logger.info(f"[ORCHESTRATOR] Agent '{key}' completed. Output length: {len(res.output)} chars")
             logger.debug(f"[ORCHESTRATOR] Agent '{key}' output: {res.output[:200]}...")
