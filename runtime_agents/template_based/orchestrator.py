@@ -3,16 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
-from .agents import AgentInstance, AgentResult, AgentTemplate
-from .llm import LLMClient, Message
-from .logger import get_logger
-from .tools import Tool
+from runtime_agents.shared.base import BaseOrchestrator, ExecutionMetrics
+from runtime_agents.shared.llm import LLMClient, Message
+from runtime_agents.shared.logger import get_logger
+from runtime_agents.shared.tools import Tool
+
+from runtime_agents.shared.base import AgentResult
+
+from .agents import AgentInstance, AgentTemplate
 
 logger = get_logger(__name__)
 
 
 @dataclass
-class Orchestrator:
+class Orchestrator(BaseOrchestrator):
     """Routes a request to a set of agent templates, spawns instances, runs them, aggregates.
 
     This starter uses:
@@ -45,7 +49,7 @@ class Orchestrator:
                 temperature=0.0,
             )
             logger.debug(f"[ROUTER] LLM routing response: {out}")
-            keys = [k.strip() for k in out.split(",") if k.strip()]
+            keys = [k.strip().lower() for k in out.split(",") if k.strip()]
             keys = [k for k in keys if k in self.registry]
             if keys:
                 logger.info(f"[ROUTER] Selected agents via LLM: {keys}")
@@ -87,8 +91,11 @@ class Orchestrator:
         logger.debug(f"[ORCHESTRATOR] Session context length: {len(self.session_context)} chars")
         
         plan = await self._route(requirement)
+        if not plan and "Uploaded files available:" in self.session_context:
+            plan = ["analyst"]
+            logger.info(f"[ORCHESTRATOR] Empty plan but session has files; fallback to analyst: {plan}")
         logger.info(f"[ORCHESTRATOR] Execution plan: {plan}")
-        
+
         results: List[AgentResult] = []
 
         context = ""
@@ -100,7 +107,7 @@ class Orchestrator:
             if context:
                 full_context = (full_context + "\n\n" + context) if full_context else context
             logger.debug(f"[ORCHESTRATOR] Passing context to agent (length: {len(full_context) if full_context else 0} chars)")
-            
+
             res = await agent.run(requirement, context=full_context if full_context else None)
             logger.info(f"[ORCHESTRATOR] Agent '{key}' completed. Output length: {len(res.output)} chars")
             logger.debug(f"[ORCHESTRATOR] Agent '{key}' output: {res.output[:200]}...")
@@ -120,3 +127,16 @@ class Orchestrator:
         logger.info(f"[ORCHESTRATOR] Aggregation complete. Final answer length: {len(final)} chars")
 
         return results, final
+
+    def get_metrics(self) -> ExecutionMetrics:
+        """Get performance metrics for the last execution."""
+        # This would be populated during execution
+        # For now, return a placeholder
+        return ExecutionMetrics(
+            agent_type="template_based",
+            execution_time=0.0,
+            token_usage={"input_tokens": 0, "output_tokens": 0},
+            cost_estimate=0.0,
+            num_agents_spawned=0,
+            tool_calls_count=0,
+        )

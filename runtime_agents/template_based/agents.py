@@ -6,17 +6,12 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from .llm import LLMClient, Message
-from .logger import get_logger
-from .tools import Tool
+from runtime_agents.shared.base import AgentResult
+from runtime_agents.shared.llm import LLMClient, Message
+from runtime_agents.shared.logger import get_logger
+from runtime_agents.shared.tools import Tool
 
 logger = get_logger(__name__)
-
-
-class AgentResult(BaseModel):
-    agent_name: str
-    output: str
-    tool_calls: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
