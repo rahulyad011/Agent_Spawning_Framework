@@ -39,9 +39,10 @@ celerybeat-schedule.db
 backend/nl2sql_evaluator/results/*
 pyvenv/
 
-# Session and upload storage
-sessions/
-uploads/
+sessions/*
 
-# Performance metrics
-performance_metrics.json
+.venv/
+
+.cursor/
+
+uploads/*
